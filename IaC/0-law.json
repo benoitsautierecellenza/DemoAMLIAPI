@@ -1,0 +1,106 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "LOCATION": {
+            "type": "string",
+            defaultValue: "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for Azure resources to be created."
+            }
+        }
+    },
+    "variables": {
+        "LOGANALYTICS_WORKSPACE_SKU": "pergb2018",
+        "LOGANALYTICS_WORKSPACE_CUSTOM_TABLE_API_VERSION": "2023-09-01",
+        "LOG_ANALYTICS_WORKSPACE_CUSTOM_TABLE_RETENTION": 30,
+        "LOGANALYTICS_WORKSPACE_NAME": "[concat(toLower(parameters('ENVIRONMENT_NAME')),'logw')]",
+        "LOGANALYTICS_WORKSPACE_RETENTION": 31,
+        "LOG_ANALYTICS_DAILY_CAP": 5
+    },
+    "resources": [
+        {
+            "type": "Microsoft.OperationalInsights/workspaces",
+            "apiVersion": "2021-12-01-preview",
+            "name": "[variables('LOGANALYTICS_WORKSPACE_NAME')]",
+            "dependsOn": [],
+            "location": "[parameters('LOCATION')]",
+            "properties": {
+                "sku": {
+                    "name": "[variables('LOGANALYTICS_WORKSPACE_SKU')]"
+                },
+                "retentionInDays": "[variables('LOGANALYTICS_WORKSPACE_RETENTION')]",
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled",
+                "workspaceCapping": {
+                    "dailyQuotaGb": "[variables('LOG_ANALYTICS_DAILY_CAP')]"
+                },
+                "features": {
+                    "enableLogAccessUsingOnlyResourcePermissions": true
+                }
+            }
+        },
+        {
+            "comments": "Pause script required to avoid issue when creating custom tables in Log Analytics workspace.",
+            "type": "Microsoft.Resources/deploymentScripts",
+            "apiVersion": "2020-10-01",
+            "kind": "AzurePowerShell",
+            "name": "LAWWaitsection1",
+            "location": "[parameters('LOCATION')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', variables('LOGANALYTICS_WORKSPACE_NAME'))]"
+            ],
+            "properties": {
+                "azPowerShellVersion": "3.0",
+                "scriptContent": "start-sleep -Seconds 60",
+                "cleanupPreference": "Always",
+                "retentionInterval": "PT1H"
+            }
+        },
+        {
+            "comments": "Azure Log Analytics custom table for metrics feature.",
+            "type": "Microsoft.OperationalInsights/workspaces/tables",
+            "apiVersion": "[variables('LOGANALYTICS_WORKSPACE_CUSTOM_TABLE_API_VERSION')]",
+            "name": "[concat(variables('LOGANALYTICS_WORKSPACE_NAME'), '/MyTable_CL')]",
+            "properties": {
+                "totalRetentionInDays": "[variables('LOG_ANALYTICS_WORKSPACE_CUSTOM_TABLE_RETENTION')]",
+                "plan": "Analytics",
+                "schema": {
+                    "name": "MyTable_CL",
+                    "columns": [
+                        {
+                            "name": "TimeGenerated",
+                            "type": "datetime",
+                            "description": "The time at which the data was generated"
+                        },
+                        {
+                            "name": "Computer",
+                            "type": "string",
+                            "description": "The computer that generated the data"
+                        },
+                        {
+                            "name": "AdditionalContext",
+                            "type": "dynamic",
+                            "description": "Additional message properties"
+                        },
+                        {
+                            "name": "CounterName",
+                            "type": "string",
+                            "description": "Name of the counter"
+                        },
+                        {
+                            "name": "CounterValue",
+                            "type": "real",
+                            "description": "Value collected for the counter"
+                        }
+                    ]
+                },
+                "retentionInDays": "[variables('LOG_ANALYTICS_WORKSPACE_CUSTOM_TABLE_RETENTION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Resources/deploymentScripts', 'LAWWaitsection1')]"
+            ]
+        },
+
+    ]
+}

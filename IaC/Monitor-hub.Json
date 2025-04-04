@@ -1,0 +1,1412 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "ENVIRONMENT_NAME": {
+            "type": "string",
+            "metadata": {
+                "description": "value to be configured for the environment tag."
+            }
+        },
+        "SERVICE_VERSION": {
+            "type": "string",
+            "metadata": {
+                "description": "Version of the solution to be deployed."
+            }
+        },
+        "SERVICE_TYPE": {
+            "type": "string",
+            "metadata": {
+                "description": "Tag value to be configured for the ServiceType Tag."
+            }
+        },
+        "SOLUTION_LOG_ANALYTICS_WORKSPACE_URI": {
+            "type": "string",
+            "metadata": {
+                "description": "URI of the Log Analytics workspace for the metrics based alerts."
+            }
+        },
+        "SOLUTION_APPLICATION_INSIGHTS_RESOURCE_ID": {
+            "type": "string",
+            "metadata": {
+                "description": "URI of the Application Insight used by the solution."
+            }
+        },
+        "AZUREAD_SECURITY_GROUP_GUID": {
+            "type": "securestring",
+            "metadata": {
+                "description": "ObjectID of the Azure AD Security group to be used for monitoring and dev purpose."
+            }
+        },
+        "COST_BUDGET_AMOUNT": {
+            "type": "int",
+            "metadata": {
+                "description": "Cost budget for the solution."
+            }
+        },
+        "COST_BUDGET_THRESOLD1": {
+            "type": "int",
+            "metadata": {
+                "description": "Cost budget Threshold 1"
+            }
+        },
+        "COST_BUDGET_THRESOLD2": {
+            "type": "int",
+            "metadata": {
+                "description": "Cost budget Threshold 2"
+            }
+        },
+        "COST_BUDGET_RESOURCE_GROUP_NAME": {
+            "type": "array",
+            "defaultValue": [
+                "[resourceGroup().name]"
+            ],
+            "metadata": {
+                "description": "Array for Resource group to be used as scope."
+            }
+        },
+        "START_DATE": {
+            "type": "string",
+            "metadata": {
+                "description": "First day of the current month for Azure Budget time Period."
+            }
+        },
+        "ALERT_SOLUTION_SUPPORTED_REGIONS": {
+            "type": "array",
+            "metadata": {
+                "description": "List of Azure regions for witch Azure alerts must be generated."
+            }
+        },
+        "MAILNOTIFIER_FUNCTIONAPP_RESOURCEURI": {
+            "type": "string",
+            "metadata": {
+                "description": "Resource URI of the Azure Function to be used for Azure Communication Services mail notifier."
+            }
+        },
+        "MAILNOTIFIER_FUNCTIONAPP_TRIGGERURL": {
+            "type": "securestring",
+            "metadata": {
+                "description": "HTTP URI to trigger Azure Function to be used for Azure Communication Services mail notifier."
+            }
+        },
+        "ACS_FLEATURE_FLAG": {
+            "type": "string",
+            "allowedValues": [
+                "On",
+                "Off"
+            ],
+            "metadata": {
+                "description": "Feature flag to enable / disable the Azure Communication Services feature."
+            }
+        }
+    },
+    "variables": {
+        "ALERT_TARGET_RESOURCE_REGION": "[resourceGroup().location]",
+        "SOLUTION_ACTION_GROUP_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-Azure-Firewall-As-a-Service')]",
+        "ACS_SOLUTION_ACTION_GROUP_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-ACS-Azure-Firewall-As-a-Service')]",
+        "SOLUTION_ACTION_GROUP_SHORT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'AFW')]",
+        "ACS_SOLUTION_ACTION_GROUP_SHORT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'ACS')]",
+        "LOG_ANALYTICS_DAILY_CAP_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-LOGANALYTICS-DAILYCAP_ALERT')]",
+        "WEBTEST_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-WEB-TEST_ALERT')]",
+        "AZURE_FIREWALL_WRITE_ERROR_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-AZUREFIREWALL-WRITE_ALERT')]",
+        "AZURE_FIREWALL_RULECOLLECTION_WRITE_ERROR_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-AZUREFIREWALL-RULECOLLECTION-WRITE_ALERT')]",
+        "IP_GROUP_WRITE_ERROR_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-IPGROUP-WRITE_ALERT')]",
+        "AZURE_FIREWALL_WRITE_ERROR_ALERT_SCOPE": "[resourceGroup().id]",
+        "IP_GROUP_WRITE_ERROR_ALERT_SCOPE": "[resourceGroup().id]",
+        "LOG_ALERT_API_VERSION": "2020-10-01",
+        "MONITORING_READER_ROLE_ID": "43d0d8ad-25c7-4714-9337-8ba259a9fe05",
+        "ALERT_DEFAULT_STATUS": true,
+        "ACTIVITY_LOG_ALERT_SCOPE": "[concat('/subscriptions/', subscription().subscriptionId)]",
+        "METRIC_ALERT_TEST_NAME": "[concat(parameters('ENVIRONMENT_NAME'), '-TELEMETRY-METRIC-ALERT')]",
+        "WEBTEST_ALERT_DESCRIPTION": "Azure Metric Alert linked to the Application Insights web-test (telemetry).",
+        "APPLICATIONINSIGHT_NAME": "[concat(toLower(parameters('ENVIRONMENT_NAME')),'appinsight')]",
+        "CONTRIBUTOR": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+        "NEWGUID_ACG1": "[guid(resourceId('microsoft.insights/actiongroups', variables('SOLUTION_ACTION_GROUP_NAME')), resourceId('microsoft.insights/actiongroups', variables('SOLUTION_ACTION_GROUP_NAME')),'1')]",
+        "NEWGUID_ACG2": "[guid(resourceId('microsoft.insights/actiongroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME')), resourceId('microsoft.insights/actiongroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME')),'1')]",
+        "HEALTH_ALERT_NAME": "[concat(parameters('ENVIRONMENT_NAME'), '-HEALTH-ALERT')]",
+        "HEALTH_ALERT_DESCRIPTION": "Alert for Service Health of Azure services used by the solution in a selected set of Azure regions.",
+        "COST_BUDGET_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-AzureFirewallAsAService')]",
+        "COST_BUDGET_TIME_GRAIN": "Monthly",
+        "COSTMANAGEMENTREADER": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', '72fafb9e-0641-4937-9268-a91bfd8191a3')]",
+        "NEW_GUIDBUDGET1": "[guid(resourceId('Microsoft.Consumption/budgets', variables('COST_BUDGET_NAME')), resourceId('Microsoft.Consumption/budgets', variables('COST_BUDGET_NAME')),'1')]",
+        "AZURE_SERVICES_HEALTH_SERVICE_LIST": [
+            "Action Groups",
+            "Activity Logs & Alerts",
+            "Alerts",
+            "Alerts & Metrics",
+            "App Service",
+            "App Service (Linux)",
+            "Application Insights",
+            "Azure Active Directory",
+            "Azure Firewall",
+            "Azure Monitor",
+            "Functions",
+            "Log Analytics",
+            "Storage",
+            "Key Vault",
+            "Azure Firewall Manager",
+            "Azure Container Apps",
+            "Azure Container Registry",
+            "Azure Kubernetes Service (AKS)",
+            "Azure Private Link",
+            "Network Infrastructure",
+            "Container Registry",
+            "Azure Communication Services",
+            "Event Grid"
+        ],
+        "ACS_FEATURE_FLAG": "[if(equals(parameters('ACS_FLEATURE_FLAG'), 'On'), 'True', 'False')]",
+        "SCHEDULED_QUERY_RULE_ALERT_API_VERSION": "2024-01-01-preview",
+        "302_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-302-Azure-Firewall-As-a-Service')]",
+        "303_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-303-Azure-Firewall-As-a-Service')]",
+        "304_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-304-Azure-Firewall-As-a-Service')]",
+        "305_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-305-Azure-Firewall-As-a-Service')]",
+        "306_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-306-Azure-Firewall-As-a-Service')]",
+        "402_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-402-Azure-Firewall-As-a-Service')]",
+        "403_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-403-Azure-Firewall-As-a-Service')]",
+        "404_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-404-Azure-Firewall-As-a-Service')]",
+        "502_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-502-Azure-Firewall-As-a-Service')]",
+        "503_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-503-Azure-Firewall-As-a-Service')]",
+        "504_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-504-Azure-Firewall-As-a-Service')]",
+        "505_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-505-Azure-Firewall-As-a-Service')]",
+        "HostCpuThresholdExceeded_ACTIVITYID_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-HostCpuThresholdExceeded-Azure-Firewall-As-a-Service')]",
+        "FUNCTION10MINTimout_ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-Function10MinTimeout-Azure-Firewall-As-a-Service')]"
+    },
+    "resources": [
+        {
+            "comments": "Default Action group to be used for ARM-Based role notification",
+            "type": "Microsoft.Insights/actionGroups",
+            "apiVersion": "2018-03-01",
+            "name": "[variables('SOLUTION_ACTION_GROUP_NAME')]",
+            "location": "Global",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "properties": {
+                "groupShortName": "[variables('SOLUTION_ACTION_GROUP_SHORT_NAME')]",
+                "enabled": true,
+                "smsReceivers": [],
+                "emailReceivers": [],
+                "armRoleReceivers": [
+                    {
+                        "name": "Role based notification",
+                        "roleId": "[variables('MONITORING_READER_ROLE_ID')]",
+                        "useCommonAlertSchema": true
+                    }
+                ],
+                "azureFunctionReceivers": []
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[variables('NEWGUID_ACG1')]",
+            "scope": "[concat('microsoft.insights/actiongroups', '/', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+            "dependsOn": [
+                "[resourceId('microsoft.insights/actiongroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[variables('CONTRIBUTOR')]",
+                "principalId": "[parameters('AZUREAD_SECURITY_GROUP_GUID')]"
+            }
+        },
+        {
+            "comments": "Action group to be used with Azure Communication Services when feature is enabled",
+            "type": "Microsoft.Insights/actionGroups",
+            "apiVersion": "2018-03-01",
+            "name": "[variables('ACS_SOLUTION_ACTION_GROUP_NAME')]",
+            "location": "Global",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "groupShortName": "[variables('ACS_SOLUTION_ACTION_GROUP_SHORT_NAME')]",
+                "enabled": "[variables('ACS_FEATURE_FLAG')]",
+                "smsReceivers": [],
+                "emailReceivers": [],
+                "azureFunctionReceivers": [
+                    {
+                        "name": "Azure Communication Services Function",
+                        "functionAppResourceId": "[parameters('MAILNOTIFIER_FUNCTIONAPP_RESOURCEURI')]",
+                        "functionName": "MailNotifier",
+                        "httpTriggerUrl": "[parameters('MAILNOTIFIER_FUNCTIONAPP_TRIGGERURL')]",
+                        "useCommonAlertSchema": true
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[variables('NEWGUID_ACG2')]",
+            "scope": "[concat('microsoft.insights/actiongroups', '/', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]",
+            "dependsOn": [
+                "[resourceId('microsoft.insights/actiongroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[variables('CONTRIBUTOR')]",
+                "principalId": "[parameters('AZUREAD_SECURITY_GROUP_GUID')]"
+            }
+        },
+        {
+            "comments": "Activity log alert for Azure Log Analytics workspace daily cap ingestion situation.",
+            "name": "[variables('LOG_ANALYTICS_DAILY_CAP_ALERT_NAME')]",
+            "apiVersion": "[variables('LOG_ALERT_API_VERSION')]",
+            "type": "Microsoft.Insights/ActivityLogAlerts",
+            "location": "global",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall As a Service - Alert raised when Log Analytics Workspace emit a warning on daily cap ingestion.",
+                "scopes": [
+                    "[variables('ACTIVITY_LOG_ALERT_SCOPE')]"
+                ],
+                "condition": {
+                    "allOf": [
+                        {
+                            "field": "category",
+                            "equals": "Administrative"
+                        },
+                        {
+                            "field": "resourceType",
+                            "equals": "microsoft.network/firewallpolicies"
+                        },
+                        {
+                            "field": "operationName",
+                            "equals": "Microsoft.Network/firewallPolicies/write"
+                        },
+                        {
+                            "field": "level",
+                            "containsAny": [
+                                "critical"
+                            ]
+                        }
+                    ]
+                },
+                "actions": {
+                    "actionGroups": [
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+                        },
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Activity log alert for Write error on Azure Firewall policies.",
+            "name": "[variables('AZURE_FIREWALL_WRITE_ERROR_ALERT_NAME')]",
+            "apiVersion": "[variables('LOG_ALERT_API_VERSION')]",
+            "type": "Microsoft.Insights/ActivityLogAlerts",
+            "location": "global",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall As a Service - Alert raised when an Azure Firewall policy write operation failed.",
+                "scopes": [
+                    "[variables('AZURE_FIREWALL_WRITE_ERROR_ALERT_SCOPE')]"
+                ],
+                "condition": {
+                    "allOf": [
+                        {
+                            "field": "category",
+                            "equals": "Administrative"
+                        },
+                        {
+                            "field": "resourceType",
+                            "equals": "microsoft.network/firewallpolicies"
+                        },
+                        {
+                            "field": "operationName",
+                            "equals": "Microsoft.Network/firewallPolicies/write"
+                        },
+                        {
+                            "field": "level",
+                            "containsAny": [
+                                "critical",
+                                "error"
+                            ]
+                        },
+                        {
+                            "field": "status",
+                            "containsAny": [
+                                "failed"
+                            ]
+                        }
+                    ]
+                },
+                "actions": {
+                    "actionGroups": [
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+                        },
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Activity log alert for Write error on Azure Firewall policies rule collections.",
+            "name": "[variables('AZURE_FIREWALL_RULECOLLECTION_WRITE_ERROR_ALERT_NAME')]",
+            "apiVersion": "[variables('LOG_ALERT_API_VERSION')]",
+            "type": "Microsoft.Insights/ActivityLogAlerts",
+            "location": "global",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall As a Service - Alert raised when an Azure Firewall policy rule collection write operation failed.",
+                "scopes": [
+                    "[variables('AZURE_FIREWALL_WRITE_ERROR_ALERT_SCOPE')]"
+                ],
+                "condition": {
+                    "allOf": [
+                        {
+                            "field": "category",
+                            "equals": "Administrative"
+                        },
+                        {
+                            "field": "resourceType",
+                            "equals": "Microsoft.Network/firewallPolicies/ruleCollectionGroups"
+                        },
+                        {
+                            "field": "operationName",
+                            "equals": "Microsoft.Network/firewallPolicies/ruleCollectionGroups/write"                            
+                        },
+                        {
+                            "field": "level",
+                            "containsAny": [
+                                "critical",
+                                "error"
+                            ]
+                        },
+                        {
+                            "field": "status",
+                            "containsAny": [
+                                "failed"
+                            ]
+                        }
+                    ]
+                },
+                "actions": {
+                    "actionGroups": [
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+                        },
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Activity log alert for Write error on IP group.",
+            "name": "[variables('IP_GROUP_WRITE_ERROR_ALERT_NAME')]",
+            "apiVersion": "[variables('LOG_ALERT_API_VERSION')]",
+            "type": "Microsoft.Insights/ActivityLogAlerts",
+            "location": "global",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall As a Service - Alert raised when an IP group write operation failed.",
+                "scopes": [
+                    "[variables('IP_GROUP_WRITE_ERROR_ALERT_SCOPE')]"
+                ],
+                "condition": {
+                    "allOf": [
+                        {
+                            "field": "category",
+                            "equals": "Administrative"
+                        },
+                        {
+                            "field": "resourceType",
+                            "equals": "microsoft.network/ipgroups"
+                        },
+                        {
+                            "field": "operationName",
+                            "equals": "Microsoft.Network/ipGroups/write"
+                        },
+                        {
+                            "field": "level",
+                            "containsAny": [
+                                "critical",
+                                "error"
+                            ]
+                        },
+                        {
+                            "field": "status",
+                            "containsAny": [
+                                "failed"
+                            ]
+                        }
+                    ]
+                },
+                "actions": {
+                    "actionGroups": [
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+                        },
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure metric alert related to Application Insights availabilityResults.",
+            "type": "microsoft.insights/metricAlerts",
+            "apiVersion": "2018-03-01",
+            "name": "[variables('METRIC_ALERT_TEST_NAME')]",
+            "location": "global",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "properties": {
+                "severity": 1,
+                "description": "[variables('WEBTEST_ALERT_DESCRIPTION')]",
+                "enabled": true,
+                "scopes": [
+                    "[parameters('SOLUTION_APPLICATION_INSIGHTS_RESOURCE_ID')]"
+                ],
+                "evaluationFrequency": "PT5M",
+                "windowSize": "PT5M",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "threshold": 100,
+                            "name": "Metric1",
+                            "metricNamespace": "Microsoft.Insights/components",
+                            "metricName": "availabilityResults/availabilityPercentage",
+                            "operator": "LessThan",
+                            "timeAggregation": "Average",
+                            "skipMetricValidation": false,
+                            "criterionType": "StaticThresholdCriterion"
+                        }
+                    ],
+                    "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria"
+                },
+                "autoMitigate": true,
+                "targetResourceType": "Microsoft.Insights/components",
+                "targetResourceRegion": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+                "actions": [
+                    {
+                        "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "webHookProperties": {}
+                    },
+                    {
+                        "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]",
+                        "webHookProperties": {}
+                    }
+                ]
+            }
+        },
+        {
+            "comments": "Health alert",
+            "type": "microsoft.insights/activityLogAlerts",
+            "apiVersion": "2020-10-01",
+            "name": "[variables('HEALTH_ALERT_NAME')]",
+            "location": "Global",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "scopes": [
+                    "[variables('ACTIVITY_LOG_ALERT_SCOPE')]"
+                ],
+                "condition": {
+                    "allOf": [
+                        {
+                            "field": "category",
+                            "equals": "ServiceHealth"
+                        },
+                        {
+                            "field": "properties.impactedServices[*].ServiceName",
+                            "containsAny": "[variables('AZURE_SERVICES_HEALTH_SERVICE_LIST')]"
+                        },
+                        {
+                            "field": "properties.impactedServices[*].ImpactedRegions[*].RegionName",
+                            "containsAny": "[parameters('ALERT_SOLUTION_SUPPORTED_REGIONS')]"
+                        }
+                    ]
+                },
+                "actions": {
+                    "actionGroups": [
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+                        },
+                        {
+                            "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                        }
+                    ]
+                },
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "[variables('HEALTH_ALERT_DESCRIPTION')]"
+            }
+        },
+        {
+            "comments": "Azure budget alert.",
+            "type": "Microsoft.Consumption/budgets",
+            "apiVersion": "2021-10-01",
+            "name": "[variables('COST_BUDGET_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "properties": {
+                "timePeriod": {
+                    "startDate": "[parameters('START_DATE')]"
+                },
+                "timeGrain": "[variables('COST_BUDGET_TIME_GRAIN')]",
+                "amount": "[parameters('COST_BUDGET_AMOUNT')]",
+                "category": "Cost",
+                "notifications": {
+                    "NotificationForExceededBudget1": {
+                        "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                        "operator": "GreaterThan",
+                        "ThresholdType": "Actual",
+                        "threshold": "[parameters('COST_BUDGET_THRESOLD1')]",
+                        "contactGroups": [
+                            "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+                        ]
+                    },
+                    "NotificationForExceededBudget2": {
+                        "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                        "operator": "GreaterThan",
+                        "thresholdType": "Actual",
+                        "threshold": "[parameters('COST_BUDGET_THRESOLD2')]",
+                        "contactGroups": [
+                            "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]"
+                        ]
+                    }
+                },
+                "filter": {
+                    "dimensions": {
+                        "name": "ResourceGroupName",
+                        "operator": "In",
+                        "values": "[parameters('COST_BUDGET_RESOURCE_GROUP_NAME')]"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2022-04-01",
+            "name": "[variables('NEW_GUIDBUDGET1')]",
+            "scope": "[concat('Microsoft.Consumption/budgets', '/', variables('COST_BUDGET_NAME'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Consumption/budgets', variables('COST_BUDGET_NAME'))]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[variables('COSTMANAGEMENTREADER')]",
+                "principalId": "[parameters('AZUREAD_SECURITY_GROUP_GUID')]"
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 302 - Error while updating an Azure Firewall policy",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('302_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('302_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Error while updating Azure Firewall policy resource",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 302 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 303 - Maximum lock duration situation on Azure Firewall policy.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('303_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('303_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Maximum lock duration on Azure Firewall policy resource.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 303 | where TimeGenerated > ago(10m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 304 - Maximum dequeue count reached for Azure Firewall policy related message. Message moved to backup queue.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('304_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('304_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Maximum dequeue count reached for Azure Firewall policy related message. Message moved to backup queue.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 304 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 305 - Reached maximum message to dequeue in a run. Low performance situation.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('305_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('305_ACTIVITYID_ALERT_NAME')]",
+                "severity": 2,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Reached maximum message to dequeue in a run. Low performance situation.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 305 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 402 - Error while updating IPGroup. Message will not be dequeued.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('402_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('402_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Error while updating IPGroup. Message will not be dequeued.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 402 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 403 - Message dequeued more than allowed for the maximum dequeue count. Message will be relocated to backup queue.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('403_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('403_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Message dequeued more than allowed for the maximum dequeue count. Message will be relocated to backup queue.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 403 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 404 - Maximum lock duration situation. Another process is locking the resource. Cannot perform updates.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('404_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('404_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Maximum lock duration situation. Another process is locking the resource. Cannot perform updates.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 404 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 306 - Invalid JSOn payload generated by the solution.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('306_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('306_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall is unable to deserialize a JSON payload generated by the solution. Critical situation.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 306 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": false,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 502 - Unable to access Azure AD Entra.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('502_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('502_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall As a Service cannot access Azure AD Entra to expand Azure AD group membership.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 502 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 503 - No mail recipients for mail notification.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('503_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('503_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall As a Service cannot send mail notification due to lake of mail recipients",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 503 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 504 - Unable to negociate token for Azure Communication Services.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('504_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('504_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall As a Service cannot send mail because unable to request Azure AD Entra token.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 504 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Activity log ID 505 - Unable Unable to send mail using Azure Communication Services.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('505_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('505_ACTIVITYID_ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Azure Firewall As a Service failed to send mail notification using Azure Communication Services.",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "Activitylog_CL | where Metadata.ActivityLog_ID == 505 | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Azure Function HostCpuThresholdExceeded situation.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('HostCpuThresholdExceeded_ACTIVITYID_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('HostCpuThresholdExceeded_ACTIVITYID_ALERT_NAME')]",
+                "severity": 2,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Warning for Azure Function HostCpuThresholdExceeded situation.",
+                "evaluationFrequency": "PT10M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT10M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "FunctionAppLogs | where EventName == 'HostCpuThresholdExceeded' | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 5,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert for Azure Function timeout situation.",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('FUNCTION10MINTimout_ALERT_NAME')]",
+            "tags": {
+                "Environment": "[parameters('ENVIRONMENT_NAME')]",
+                "ServiceType": "[parameters('SERVICE_TYPE')]",
+                "CloudControlFactoryVersion": "[Parameters('SERVICE_VERSION')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+            ],
+            "location": "[variables('ALERT_TARGET_RESOURCE_REGION')]",
+            "properties": {
+                "displayName": "[variables('FUNCTION10MINTimout_ALERT_NAME')]",
+                "severity": 2,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Warning for Azure Function 10 minutes timeout situation.",
+                "evaluationFrequency": "PT10M",
+                "scopes": [
+                    "[parameters('SOLUTION_LOG_ANALYTICS_WORKSPACE_URI')]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT10M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "FunctionAppLogs | where Level == 'Error' | where Type == 'FunctionAppLogs' | where Message contains 'Timeout value of 00:10:00 exceeded by function' | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 5,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('SOLUTION_ACTION_GROUP_NAME'))]",
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACS_SOLUTION_ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        }
+    ]
+}
