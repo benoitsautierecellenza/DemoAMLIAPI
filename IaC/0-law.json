@@ -2,21 +2,36 @@
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
     "contentVersion": "1.0.0.0",
     "parameters": {
+        "ENVIRONMENT_NAME": {
+            "type": "string",
+            "metadata": {
+                "description": "Environment name to be used in the resource name."
+            }
+        },
         "LOCATION": {
             "type": "string",
-            defaultValue: "[resourceGroup().location]",
+            "defaultValue": "[resourceGroup().location]",
             "metadata": {
                 "description": "Location for Azure resources to be created."
             }
         }
     },
     "variables": {
-        "LOGANALYTICS_WORKSPACE_SKU": "pergb2018",
+        "SCHEDULED_QUERY_RULE_ALERT_API_VERSION": "2024-01-01-preview",
+        "DATACOLLECTIONRULE_API_VERSION": "2021-09-01-preview",
+        "DATACOLLECTIONENDPOINTS_API_VERSION": "2021-04-01",
         "LOGANALYTICS_WORKSPACE_CUSTOM_TABLE_API_VERSION": "2023-09-01",
+        "LOGANALYTICS_WORKSPACE_SKU": "pergb2018",
+        "LOGANALYTICS_WORKSPACE_NAME": "[concat(toLower(parameters('ENVIRONMENT_NAME')),'-logw')]",
         "LOG_ANALYTICS_WORKSPACE_CUSTOM_TABLE_RETENTION": 30,
-        "LOGANALYTICS_WORKSPACE_NAME": "[concat(toLower(parameters('ENVIRONMENT_NAME')),'logw')]",
         "LOGANALYTICS_WORKSPACE_RETENTION": 31,
-        "LOG_ANALYTICS_DAILY_CAP": 5
+        "LOG_ANALYTICS_DAILY_CAP": 5,
+        "DATACOLLECTIONENDPOINTNAME": "[concat(parameters('ENVIRONMENT_NAME'),'-DCE-',tolower(parameters('LOCATION')))]",
+        "DATACOLLECTIONRULENAME": "[concat(parameters('ENVIRONMENT_NAME'),'-DCR-',tolower(parameters('LOCATION')))]",
+        "ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-alert')]",
+        "ALERT_DEFAULT_STATUS": true,
+        "ACTION_GROUP_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-AG01')]",
+        "MONITORING_READER_ROLE_ID": "43d0d8ad-25c7-4714-9337-8ba259a9fe05"
     },
     "resources": [
         {
@@ -101,6 +116,146 @@
                 "[resourceId('Microsoft.Resources/deploymentScripts', 'LAWWaitsection1')]"
             ]
         },
-
+        {
+            "comments": "Data Collection Endpoint resource",
+            "type": "Microsoft.Insights/dataCollectionEndpoints",
+            "apiVersion": "[variables('DATACOLLECTIONENDPOINTS_API_VERSION')]",
+            "name": "[variables('DATACOLLECTIONENDPOINTNAME')]",
+            "location": "[parameters('LOCATION')]",
+            "properties": {
+                "networkAcls": {
+                    "publicNetworkAccess": "Enabled"
+                }
+            }
+        },
+        {
+            "comments": "Data Collection Rule resource (Dependency with Data Collection Enpoint resource and Azure Log Anlytics Custom table)",
+            "type": "Microsoft.Insights/dataCollectionRules",
+            "apiVersion": "[variables('DATACOLLECTIONRULE_API_VERSION')]",
+            "name": "[variables('DATACOLLECTIONRULENAME')]",
+            "location": "[parameters('LOCATION')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('DATACOLLECTIONENDPOINTNAME'))]",
+                "[resourceId('Microsoft.Resources/deploymentScripts', 'LAWWaitsection1')]"
+                // missing dependency with table
+            ],
+            "properties": {
+                "dataCollectionEndpointId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('DATACOLLECTIONENDPOINTNAME'))]",
+                "streamDeclarations": {
+                    "Custom-MyTableRawData": {
+                        "columns": [
+                            {
+                                "name": "Time",
+                                "type": "datetime"
+                            },
+                            {
+                                "name": "Computer",
+                                "type": "string"
+                            },
+                            {
+                                "name": "AdditionalContext",
+                                "type": "string"
+                            },
+                            {
+                                "name": "CounterName",
+                                "type": "string"
+                            },
+                            {
+                                "name": "CounterValue",
+                                "type": "real"
+                            }
+                        ]
+                    }
+                },
+                "destinations": {
+                    "logAnalytics": [
+                        {
+                            "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('LOGANALYTICS_WORKSPACE_NAME'))]",
+                            "name": "logAnalyticsWorkspace"
+                        }
+                    ]
+                },
+                "dataFlows": [
+                    {
+                        "streams": [
+                            "Custom-MyTableRawData"
+                        ],
+                        "destinations": [
+                            "logAnalyticsWorkspace"
+                        ],
+                        "transformKql": "source | extend jsonContext = parse_json(AdditionalContext) | project TimeGenerated = Time, Computer, AdditionalContext = jsonContext, CounterName=tostring(jsonContext.CounterName), CounterValue=toreal(jsonContext.CounterValue)",
+                        "outputStream": "Custom-MyTable_CL"
+                    }
+                ]
+            }
+        },
+        {
+            "comments": "Azure Monitor scheduled Query alert",
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
+            "name": "[variables('ALERT_NAME')]",
+            "location": "[parameters('LOCATION')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACTION_GROUP_NAME'))]"
+            ],
+            "properties": {
+                "displayName": "[variables('ALERT_NAME')]",
+                "severity": 1,
+                "enabled": "[variables('ALERT_DEFAULT_STATUS')]",
+                "description": "Demo Azure alert for Log Ingestion API",
+                "evaluationFrequency": "PT5M",
+                "scopes": [
+                    "[resourceId('Microsoft.OperationalInsights/workspaces', variables('LOGANALYTICS_WORKSPACE_NAME'))]"
+                ],
+                "targetResourceTypes": [
+                    "microsoft.operationalinsights/workspaces"
+                ],
+                "windowSize": "PT5M",
+                "overrideQueryTimeRange": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "MyTable_CL | where TimeGenerated > ago(5m)",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "_ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 1,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": true,
+                "actions": {
+                    "actionGroups": [
+                        "[resourceId('Microsoft.Insights/actionGroups', variables('ACTION_GROUP_NAME'))]"
+                    ]
+                }
+            }
+        },
+        {
+            "comments": "Action group for role-based notifications",
+            "type": "Microsoft.Insights/actionGroups",
+            "apiVersion": "2018-03-01",
+            "name": "[variables('ACTION_GROUP_NAME')]",
+            "location": "Global",
+            "properties": {
+                "groupShortName": "[variables('ACTION_GROUP_NAME')]",
+                "enabled": true,
+                "smsReceivers": [],
+                "emailReceivers": [],
+                "armRoleReceivers": [
+                    {
+                        "name": "Role based notification",
+                        "roleId": "[variables('MONITORING_READER_ROLE_ID')]",
+                        "useCommonAlertSchema": true
+                    }
+                ],
+                "azureFunctionReceivers": []
+            }
+        }
     ]
 }
