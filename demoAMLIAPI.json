@@ -4,6 +4,7 @@
     "parameters": {
         "ENVIRONMENT_NAME": {
             "type": "string",
+            "defaultValue": "demo",
             "metadata": {
                 "description": "Environment name to be used in the resource name."
             }
@@ -17,10 +18,11 @@
         }
     },
     "variables": {
-        "SCHEDULED_QUERY_RULE_ALERT_API_VERSION": "2024-01-01-preview",
         "DATACOLLECTIONRULE_API_VERSION": "2021-09-01-preview",
+        "SCHEDULED_QUERY_RULE_ALERT_API_VERSION": "2024-01-01-preview",
         "DATACOLLECTIONENDPOINTS_API_VERSION": "2021-04-01",
         "LOGANALYTICS_WORKSPACE_CUSTOM_TABLE_API_VERSION": "2023-09-01",
+        "WORKBOOK_API_VERSION": "2022-04-01",
         "LOGANALYTICS_WORKSPACE_SKU": "pergb2018",
         "LOGANALYTICS_WORKSPACE_NAME": "[concat(toLower(parameters('ENVIRONMENT_NAME')),'-logw')]",
         "LOG_ANALYTICS_WORKSPACE_CUSTOM_TABLE_RETENTION": 30,
@@ -28,10 +30,15 @@
         "LOG_ANALYTICS_DAILY_CAP": 5,
         "DATACOLLECTIONENDPOINTNAME": "[concat(parameters('ENVIRONMENT_NAME'),'-DCE-',tolower(parameters('LOCATION')))]",
         "DATACOLLECTIONRULENAME": "[concat(parameters('ENVIRONMENT_NAME'),'-DCR-',tolower(parameters('LOCATION')))]",
+        "ACTION_GROUP_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-AG01')]",
+        "MONITORING_READER_ROLE_ID": "43d0d8ad-25c7-4714-9337-8ba259a9fe05",
         "ALERT_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-alert')]",
         "ALERT_DEFAULT_STATUS": true,
-        "ACTION_GROUP_NAME": "[Concat(parameters('ENVIRONMENT_NAME'),'-AG01')]",
-        "MONITORING_READER_ROLE_ID": "43d0d8ad-25c7-4714-9337-8ba259a9fe05"
+        "UNIVERSAL_WORKBOOK_NAME": "[guid('UniversalWorkbook')]",
+        "WorkbookDisplayName": "Azure Monitor Log Ingestion API Workbook",
+        "workbookType": "workbook",
+        "workbookSourceId": "Azure Monitor",
+        "WorkBookVersion": "1.0"
     },
     "resources": [
         {
@@ -56,6 +63,27 @@
             }
         },
         {
+            "comments": "Action group for role-based notifications",
+            "type": "Microsoft.Insights/actionGroups",
+            "apiVersion": "2018-03-01",
+            "name": "[variables('ACTION_GROUP_NAME')]",
+            "location": "Global",
+            "properties": {
+                "groupShortName": "[variables('ACTION_GROUP_NAME')]",
+                "enabled": true,
+                "smsReceivers": [],
+                "emailReceivers": [],
+                "armRoleReceivers": [
+                    {
+                        "name": "Role based notification",
+                        "roleId": "[variables('MONITORING_READER_ROLE_ID')]",
+                        "useCommonAlertSchema": true
+                    }
+                ],
+                "azureFunctionReceivers": []
+            }
+        },
+        {
             "comments": "Pause script required to avoid issue when creating custom tables in Log Analytics workspace.",
             "type": "Microsoft.Resources/deploymentScripts",
             "apiVersion": "2020-10-01",
@@ -67,7 +95,7 @@
             ],
             "properties": {
                 "azPowerShellVersion": "3.0",
-                "scriptContent": "start-sleep -Seconds 60",
+                "scriptContent": "start-sleep -Seconds 30",
                 "cleanupPreference": "Always",
                 "retentionInterval": "PT1H"
             }
@@ -190,13 +218,33 @@
             }
         },
         {
+            "comments": "Pause script required to avoid issue related to Azure Custom table not yet created when creating alert.",
+            "type": "Microsoft.Resources/deploymentScripts",
+            "apiVersion": "2020-10-01",
+            "kind": "AzurePowerShell",
+            "name": "LAWWaitsection2",
+            "location": "[parameters('LOCATION')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/dataCollectionRules', variables('DATACOLLECTIONRULENAME'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', variables('ACTION_GROUP_NAME'))]",
+                "[resourceId('Microsoft.Insights/dataCollectionRules', variables('DATACOLLECTIONRULENAME'))]",
+                "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('DATACOLLECTIONENDPOINTNAME'))]"
+            ],
+            "properties": {
+                "azPowerShellVersion": "3.0",
+                "scriptContent": "start-sleep -Seconds 30",
+                "cleanupPreference": "Always",
+                "retentionInterval": "PT1H"
+            }
+        },
+        {
             "comments": "Azure Monitor scheduled Query alert",
             "type": "microsoft.insights/scheduledqueryrules",
             "apiVersion": "[variables('SCHEDULED_QUERY_RULE_ALERT_API_VERSION')]",
             "name": "[variables('ALERT_NAME')]",
             "location": "[parameters('LOCATION')]",
             "dependsOn": [
-                "[resourceId('Microsoft.Insights/actionGroups', variables('ACTION_GROUP_NAME'))]"
+                "[resourceId('Microsoft.Resources/deploymentScripts', 'LAWWaitsection2')]"
             ],
             "properties": {
                 "displayName": "[variables('ALERT_NAME')]",
@@ -215,7 +263,7 @@
                 "criteria": {
                     "allOf": [
                         {
-                            "query": "MyTable_CL | where TimeGenerated > ago(5m)",
+                            "query": "MyTable_CL | where CounterName =='DemoMetric' | where CounterValue > 50 | where TimeGenerated > ago(5m)",
                             "timeAggregation": "Count",
                             "dimensions": [],
                             "resourceIdColumn": "_ResourceId",
@@ -237,25 +285,32 @@
             }
         },
         {
-            "comments": "Action group for role-based notifications",
-            "type": "Microsoft.Insights/actionGroups",
-            "apiVersion": "2018-03-01",
-            "name": "[variables('ACTION_GROUP_NAME')]",
-            "location": "Global",
+            "comments": "Demo Azure Workbook for Custom metrics",
+            "name": "[variables('UNIVERSAL_WORKBOOK_NAME')]",
+            "type": "microsoft.insights/workbooks",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "[variables('WORKBOOK_API_VERSION')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Resources/deploymentScripts', 'LAWWaitsection2')]"
+            ],
+            "kind": "shared",
             "properties": {
-                "groupShortName": "[variables('ACTION_GROUP_NAME')]",
-                "enabled": true,
-                "smsReceivers": [],
-                "emailReceivers": [],
-                "armRoleReceivers": [
-                    {
-                        "name": "Role based notification",
-                        "roleId": "[variables('MONITORING_READER_ROLE_ID')]",
-                        "useCommonAlertSchema": true
-                    }
-                ],
-                "azureFunctionReceivers": []
+                "displayName": "[variables('WorkbookDisplayName')]",
+                "serializedData": "{\"version\":\"Notebook/1.0\",\"items\":[{\"type\":9,\"content\":{\"version\":\"KqlParameterItem/1.0\",\"parameters\":[{\"id\":\"2d8c9142-da57-423d-aa99-82c19080c459\",\"version\":\"KqlParameterItem/1.0\",\"name\":\"Subscription\",\"label\":\"Azure Subscription\",\"type\":6,\"description\":\"Select Azure Subscription\",\"isRequired\":true,\"typeSettings\":{\"additionalResourceOptions\":[],\"includeAll\":true,\"showDefault\":false},\"value\":\"/subscriptions/448fc812-f122-47fd-b6dd-08917bda2d30\"},{\"id\":\"345827c6-1add-41e1-bb18-9afbf0064969\",\"version\":\"KqlParameterItem/1.0\",\"name\":\"TimeRange\",\"label\":\"Time range\",\"type\":4,\"description\":\"Time range to filter metric query\",\"isRequired\":true,\"typeSettings\":{\"selectableValues\":[{\"durationMs\":300000},{\"durationMs\":900000},{\"durationMs\":1800000},{\"durationMs\":3600000},{\"durationMs\":14400000},{\"durationMs\":43200000},{\"durationMs\":86400000},{\"durationMs\":172800000},{\"durationMs\":259200000},{\"durationMs\":604800000},{\"durationMs\":1209600000},{\"durationMs\":2419200000},{\"durationMs\":2592000000},{\"durationMs\":5184000000},{\"durationMs\":7776000000}]},\"value\":{\"durationMs\":172800000}},{\"id\":\"dc341d26-d050-4f59-9d3d-e13ee469a1c1\",\"version\":\"KqlParameterItem/1.0\",\"name\":\"LogAnalyticsWorkspace\",\"label\":\"Log Analytics Workspace\",\"type\":5,\"isRequired\":true,\"query\":\"resources\\r\\n| where type == 'microsoft.operationalinsights/workspaces'\\r\\n| where subscriptionId == '{Subscription:id}'\\r\\n| project id\\r\\n\",\"crossComponentResources\":[\"{Subscription}\"],\"typeSettings\":{\"additionalResourceOptions\":[],\"showDefault\":false},\"queryType\":1,\"resourceType\":\"microsoft.resourcegraph/resources\",\"value\":\"/subscriptions/448fc812-f122-47fd-b6dd-08917bda2d30/resourceGroups/DemoLogIngestion/providers/Microsoft.OperationalInsights/workspaces/demo-logw\"},{\"id\":\"d464b1d2-b3c8-4908-bdeb-d59df6379a8d\",\"version\":\"KqlParameterItem/1.0\",\"name\":\"AzureRegion\",\"label\":\"Azure Region\",\"type\":8,\"description\":\"Select an Azure region to filter metric\",\"isRequired\":true,\"typeSettings\":{\"additionalResourceOptions\":[],\"includeAll\":true,\"showDefault\":false},\"timeContext\":{\"durationMs\":86400000},\"value\":\"global\"}],\"style\":\"pills\",\"queryType\":0,\"resourceType\":\"microsoft.resourcegraph/resources\"},\"name\":\"parameters - 0\"},{\"type\":3,\"content\":{\"version\":\"KqlItem/1.0\",\"query\":\"MyTable_CL\\r\\n| where AdditionalContext.InstanceName contains '{AzureRegion}'\\r\\n| project TimeGenerated, Computer, AdditionalContext.CounterName, AdditionalContext.CounterValue, AdditionalContext.InstanceName\\r\\n\",\"size\":0,\"timeContextFromParameter\":\"TimeRange\",\"queryType\":0,\"resourceType\":\"microsoft.operationalinsights/workspaces\",\"crossComponentResources\":[\"{LogAnalyticsWorkspace}\"],\"gridSettings\":{\"formatters\":[{\"columnMatch\":\"TimeGenerated\",\"formatter\":6}]}},\"name\":\"query - 1\"}],\"isLocked\":false,\"fallbackResourceIds\":[\"azure monitor\"]}",
+                "version": "[variables('WorkBookVersion')]",
+                "sourceId": "[variables('workbookSourceId')]",
+                "category": "[variables('workbookType')]"
             }
         }
-    ]
+    ],
+    "outputs": {
+        "dataCollectionEndpointURL": {
+            "type": "String",
+            "value": "[reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('DATACOLLECTIONENDPOINTNAME'))).logsIngestion.endpoint]"
+        },
+        "DCRimmutableId": {
+            "type": "String",
+            "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', variables('DATACOLLECTIONRULENAME'))).immutableId]"
+        }
+    }
 }
