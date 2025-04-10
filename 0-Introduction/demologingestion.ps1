@@ -1,4 +1,11 @@
-# Transformer pour publier un volume de métriques
+#
+# Demo code to publish a custom metrrics in an Azure Log Analytics Workspace Custom table using the Azure Monitor Log Ingestion API
+#
+# Author :  Benoît SAUTIERE (Cellenza)
+#
+# Version : 1.0
+# Date : 2023-10-03
+#
 # Example : . .\demologingestion.ps1 -ResourceGroup_name "DemoLogIngestion"  -MetricValue 100
 #
 using namespace System.Net
